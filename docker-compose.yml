@@ -1,0 +1,33 @@
+services:
+  # Primary Database Node
+  mongo-primary:
+    image: mongo:7.0
+    container_name: volt-mongo-1
+    command: ["--replSet", "rs0", "--bind_ip_all"]
+    ports:
+      - "27017:27017"
+    volumes:
+      - ./data/db1:/data/db
+
+  # Secondary Database Node
+  mongo-secondary:
+    image: mongo:7.0
+    container_name: volt-mongo-2
+    command: ["--replSet", "rs0", "--bind_ip_all", "--port", "27018"]
+    ports:
+      - "27018:27018"
+    volumes:
+      - ./data/db2:/data/db
+
+  # Your Rust Ingestor
+  rust-app:
+    build:
+      context: ./battery-ingestor # This tells Docker to look inside the folder
+      dockerfile: Dockerfile # This is the filename inside that folder
+    container_name: volt-ingestor
+    ports:
+      - "8080:8080"
+    depends_on:
+      - mongo-primary
+    environment:
+      - MONGO_URI=mongodb://mongo-primary:27017/BatterySentinel
