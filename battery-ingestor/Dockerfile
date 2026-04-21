@@ -4,6 +4,7 @@ FROM rustlang/rust:nightly as builder
 WORKDIR /app
 COPY . .
 # We use the nightly compiler to handle the new edition
+ENV CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
 RUN cargo +nightly build --release
 
 # Use a tiny runtime image to keep it fast
