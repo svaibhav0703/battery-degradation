@@ -11,8 +11,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install Rust Nightly
-        run: rustup default nightly
       - name: Run Tests
         run: cd battery-ingestor && cargo test
       - name: Check Build

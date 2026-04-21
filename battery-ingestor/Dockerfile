@@ -14,3 +14,4 @@ WORKDIR /usr/local/bin
 COPY --from=builder /app/target/release/battery-ingestor .
 EXPOSE 8080
 CMD ["./battery-ingestor"]
+# PROJECT
