@@ -1,52 +1,80 @@
-use reqwest::StatusCode;
+// tests/integration_tests.rs
+
 use serde_json::json;
 use tokio::net::TcpListener;
 use std::time::Duration;
+use axum::{routing::post, Json, Router};
+use serde::{Deserialize, Serialize};
 
-async fn spawn_app() {
-    // Start a listener on 8080
-    let listener = TcpListener::bind("127.0.0.1:8080").await.expect("Failed to bind port");
-    
-    // For now, we just let it sit there so the connection isn't "Refused".
-    // In a real project, you'd wrap your Axum router here.
-    tokio::spawn(async move {
-        let mut incoming = listener; 
-        // This keeps the port open for the test duration
-        loop { tokio::task::yield_now().await; }
-    });
+// ── Minimal mirror of your production BatteryData ──────────────────────────
+#[derive(Debug, Serialize, Deserialize)]
+struct BatteryData {
+    id: String,
+    voltage: f32,
+    current: f32,
+    temp: f32,
+    score: f32,
+    status: String,
 }
 
-#[tokio::test]
-async fn test_telemetry_ingestion_success() {
-    // 1. Start the server in a background task
-    spawn_app().await;
+// ── Spin up a REAL Axum server (no MongoDB) on a random free port ───────────
+async fn spawn_app() -> String {
+    // Port 0 → OS picks a free port, eliminating "address in use" flakiness
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("Failed to bind port");
 
-    // 2. Wait a tiny bit for the OS to open the port
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    let addr = listener.local_addr().unwrap();
 
-    let client = reqwest::Client::new();
-    let server_url = "http://127.0.0.1:8080/telemetry";
+    // Real router with a stub handler — no MongoDB needed
+    let app = Router::new().route(
+        "/telemetry",
+        post(|Json(_payload): Json<BatteryData>| async { "ACK: Data Stored" }),
+    );
 
-    let test_data = json!({
-        "id": "ESP32_NODE_01",
-        "voltage": 12.6,
-        "current": 1.2,
-        "temp": 35.5,
-        "score": 98.0,
-        "status": "Healthy"
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
     });
 
-    // 3. Perform the request
+    format!("http://{}", addr)
+}
+
+// ── The actual test ─────────────────────────────────────────────────────────
+#[tokio::test]
+async fn test_telemetry_ingestion_success() {
+    let base_url = spawn_app().await;
+
+    // Small grace period for the spawned task to start accepting
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let client = reqwest::Client::new();
+    let url = format!("{}/telemetry", base_url);
+
+    let test_data = json!({
+        "id":      "ESP32_NODE_01",
+        "voltage": 12.6,
+        "current": 1.2,
+        "temp":    35.5,
+        "score":   98.0,
+        "status":  "Healthy"
+    });
+
     let response = client
-        .post(server_url)
+        .post(&url)
         .json(&test_data)
         .send()
         .await
-        .expect("Connection failed!");
+        .expect("Request failed");
 
-    // 4. Use the response to clear the "unused variable" warning
     println!("Response status: {}", response.status());
-    
-    // This will pass the connection check, even if it returns 404
-    assert!(response.status().is_client_error() || response.status().is_success());
+
+    // The stub returns 200 OK with the ACK body
+    assert!(
+        response.status().is_success(),
+        "Expected 2xx, got {}",
+        response.status()
+    );
+
+    let body = response.text().await.unwrap();
+    assert_eq!(body, "ACK: Data Stored");
 }
